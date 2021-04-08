@@ -8,9 +8,67 @@
 </textarea>
 <script>
 /* jslint utility2:true */
-(function () {
+(async function () {
     "use strict";
-    f
+    let protectedDatabase;
+    let sqlCallbackDict;
+    let sqlCallbackId;
+    async function protectedMessagePost({
+        action = "exec",
+        data,
+        params,
+        sql
+    }) {
+    /*
+     * this function will post msg to <protectedDatabase> and return result
+     */
+        let id;
+        sqlCallbackId += 1;
+        id = sqlCallbackId;
+        protectedDatabase.postMessage({
+            action,
+            buffer: data,
+            id,
+            params,
+            sql
+        });
+        let {
+            error,
+            results = []
+        } = await new Promise(function (resolve) {
+            sqlCallbackDict[sqlCallbackId] = resolve;
+        });
+        delete sqlCallbackDict[id];
+        if (error) {
+            throw error;
+        }
+        results = results.map(function ({
+            columns,
+            values
+        }) {
+            return values.map(function (list) {
+                let dict;
+                dict = {};
+                columns.forEach(function (key, ii) {
+                    dict[key] = list[ii];
+                });
+                return dict;
+            });
+        });
+        return results;
+    }
+    // init protectedDatabase
+    sqlCallbackDict = {};
+    sqlCallbackId = 1;
+    protectedDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
+    protectedDatabase.onmessage = function ({
+        data
+    }) {
+        sqlCallbackDict[data.id](data);
+    };
+    console.log(await protectedMessagePost({
+        sql: "select 1 as aa;\n"
+    }));
 }());
 </script>
 </body>
