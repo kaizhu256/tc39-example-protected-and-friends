@@ -3,7 +3,7 @@
 <head>
 <style>
 body {
-    font-family: consolas, menlo, monospace;
+    font-family: arial, helvetica, sans-serif;
     font-size: 11px;
 }
 button {
@@ -16,6 +16,10 @@ table td,
 table th {
     border: 1px solid #000;
 }
+#dbOpen2 {
+    height: 0;
+    width: 0;
+}
 </style>
 </head>
 <body>
@@ -24,14 +28,15 @@ table th {
 <br>
 <button id="dbSave1">save sqlite database</button><br>
 <button id="dbOpen1">load sqlite database</button><br>
+<input id="dbOpen2" type="file">
 <br>
 <table id="enemyTable1">
     <thead>
     <tr>
         <th></th>
         <th>rowid</th>
-        <th>type</th>
-        <th>health</th>
+        <th>enemy type</th>
+        <th>enemy health</th>
     </tr>
     </thead>
     <tbody></tbody>
@@ -40,6 +45,7 @@ table th {
 /* jslint utility2:true */
 (async function () {
     "use strict";
+    let blobDownload;
     let privateDatabase;
     let sqlCallbackDict;
     let sqlCallbackId;
@@ -55,7 +61,6 @@ table th {
         let id;
         sqlCallbackId += 1;
         id = sqlCallbackId;
-        console.error(sql);
         privateDatabase.postMessage({
             action,
             buffer: data,
@@ -64,6 +69,7 @@ table th {
             sql
         });
         let {
+            buffer,
             error,
             results = []
         } = await new Promise(function (resolve) {
@@ -72,6 +78,9 @@ table th {
         delete sqlCallbackDict[id];
         if (error) {
             throw error;
+        }
+        if (action === "export") {
+            return buffer;
         }
         results = results.map(function ({
             columns,
@@ -90,7 +99,6 @@ table th {
     }
     // init enemy-api
     async function enemyAttack(enemyid, amount) {
-        console.error(enemyid);
         await privateSqlPostMessage({
             sql: (`
 UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemyid};
@@ -149,7 +157,6 @@ INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
      */
         let enemyList;
         enemyList = await enemyListGet();
-        console.error(JSON.stringify(enemyList, undefined, 4));
         document.querySelector(
             "#enemyTable1 tbody"
         ).innerHTML = enemyList.map(function ({
@@ -181,21 +188,15 @@ INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
         sqlCallbackDict[data.id](data);
     };
     // init evt-handling
-    document.querySelector(
-        "#enemyCreateGoblin1"
-    ).addEventListener("click", async function () {
+    document.querySelector("#enemyCreateGoblin1").onclick = async function () {
         await enemyCreateGoblin();
         await uiEnemyListRefresh();
-    });
-    document.querySelector(
-        "#enemyCreateSlime1"
-    ).addEventListener("click", async function () {
+    };
+    document.querySelector("#enemyCreateSlime1").onclick = async function () {
         await enemyCreateSlime();
         await uiEnemyListRefresh();
-    });
-    document.querySelector(
-        "#enemyTable1"
-    ).addEventListener("click", async function ({
+    };
+    document.querySelector("#enemyTable1").onclick = async function ({
         target
     }) {
         switch (target.dataset?.action) {
@@ -204,7 +205,51 @@ INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
             await uiEnemyListRefresh();
             break;
         }
-    });
+    };
+    document.querySelector("#dbOpen1").onclick = function () {
+        document.querySelector("#dbOpen2").click();
+    };
+    document.querySelector("#dbOpen2").onchange = async function ({
+        target
+    }) {
+        if (target.files.length === 0) {
+            return;
+        }
+        privateSqlPostMessage({
+            action: "close"
+        });
+        await privateSqlPostMessage({
+            action: "open",
+            data: await target.files[0].arrayBuffer()
+        });
+        await uiEnemyListRefresh();
+    };
+    document.querySelector("#dbSave1").onclick = async function () {
+    /*
+     * this function will save sqlite database to ~/Downloads directory
+     */
+        let data;
+        let elem;
+        // cleanup
+        URL.revokeObjectURL(blobDownload);
+        data = await privateSqlPostMessage({
+            action: "export"
+        });
+        console.error(data);
+        blobDownload = URL.createObjectURL(new window.Blob([
+            data
+        ]));
+        elem = document.createElement("a");
+        elem.href = blobDownload;
+        // cleanup
+        setTimeout(function () {
+            URL.revokeObjectURL(elem.href);
+        }, 30000);
+        elem.download = "sqlite-database.sqlite";
+        elem.click();
+    };
+    // create some enemies
+    await enemyCreateGoblin();
     await enemyCreateSlime();
     await uiEnemyListRefresh();
 }());
