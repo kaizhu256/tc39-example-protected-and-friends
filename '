@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<style>
+body {
+    font-family: consolas, menlo, monospace;
+    font-size: 11px;
+}
+button {
+    width: 200px;
+}
+table {
+    border-collapse: collapse;
+}
+table td,
+table th {
+    border: 1px solid #000;
+}
+</style>
+</head>
+<body>
+<button id="enemyCreate1">create slime enemy</button><br>
+<button id="dbOpen1">load enemy database</button><br>
+<button id="dbSave1">save enemy database</button><br>
+<br>
+<table id="enemyTable1">
+    <thead>
+    <tr>
+        <th></th>
+        <th>rowid</th>
+        <th>type</th>
+        <th>health</th>
+    </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+<script>
+/* jslint utility2:true */
+(function () {
+    "use strict";
+    let protectedDatabase;
+    let sqlCallbackDict;
+    let sqlCallbackId;
+    async function protectedSqlExec({
+        action = "exec",
+        data,
+        params,
+        sql
+    }) {
+    /*
+     * this function will post msg to <protectedDatabase> and return result
+     */
+        let id;
+        sqlCallbackId += 1;
+        id = sqlCallbackId;
+        protectedDatabase.postMessage({
+            action,
+            buffer: data,
+            id,
+            params,
+            sql
+        });
+        let {
+            error,
+            results = []
+        } = await new Promise(function (resolve) {
+            sqlCallbackDict[sqlCallbackId] = resolve;
+        });
+        delete sqlCallbackDict[id];
+        if (error) {
+            throw error;
+        }
+        results = results.map(function ({
+            columns,
+            values
+        }) {
+            return values.map(function (list) {
+                let dict;
+                dict = {};
+                columns.forEach(function (key, ii) {
+                    dict[key] = list[ii];
+                });
+                return dict;
+            });
+        });
+        return results;
+    }
+    // init protectedDatabase
+    sqlCallbackDict = {};
+    sqlCallbackId = 1;
+    protectedDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
+    protectedDatabase.onmessage = function ({
+        data
+    }) {
+        sqlCallbackDict[data.id](data);
+    };
+    // init enemy-api
+    async function enemyCreate({
+        fncProtectedApi,
+        health,
+        type
+    }) {
+        let data;
+        let enemy;
+        data = await protectedSqlExec({
+            sql: (`
+CREATE TABLE IF NOT EXISTS enemy (
+    type TEXT NOT NULL,
+    health INTEGER NOT NULL
+);
+INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
+SELECT LAST_INSERT_ROWID() AS enemyid;
+            `)
+        });
+        enemy = {};
+        enemy.id = data[0][0].enemyid;
+        fncProtectedApi(enemy, protectedSqlExec);
+        return enemy;
+    }
+    async function enemyListGet() {
+        let data;
+        data = await protectedSqlExec({
+            sql: `SELECT rowid, * FROM enemy`
+        });
+        return data[0];
+    }
+    // export public-facing enemy-api
+    window.enemyCreate = enemyCreate;
+    window.enemyListGet = enemyListGet;
+}());
+
+
+(async function () {
+    "use strict";
+    async function enemyListRefresh() {
+        let enemyList;
+        enemyList = await window.enemyListGet();
+        document.querySelector(
+            "#enemyTable1 tbody"
+        ).innerHTML = enemyList.map(function ({
+            health,
+            rowid,
+            type
+        }, ii) {
+            return (`
+<tr>
+    <td>
+        <button data-action="attack" data-ii="${ii}">
+        [protected] reduce health by 2
+        </button>
+    </td>
+    <td>${rowid}</td>
+    <td>${type}</td>
+    <td>${health}</td>
+</tr>
+            `);
+        }).join("");
+        // init evt-handling for enemyList
+        document.querySelector(
+            "#enemyTable1 tbody"
+        ).addEventListener("click", async function ({
+            target
+        }) {
+            switch (target.dataset?.action) {
+            case "attack":
+                debugInline(enemyList);
+                enemyList[target.dataset.ii].attack(2);
+                await enemyListRefresh();
+                break;
+            }
+        });
+    }
+    async function enemySlimeCreate() {
+        let enemy;
+        enemy = window.enemyCreate({
+            fncProtectedApi: function (enemy, protectedSqlExec) {
+                enemy.attack = async function (amount) {
+                    await protectedSqlExec({
+                        sql: (`
+UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemy.id};
+DELETE FROM enemy where health <= 0;
+                        `)
+                    });
+                };
+            },
+            health: 10,
+            type: "slime"
+        });
+        await enemyListRefresh();
+        return enemy;
+    }
+    await enemySlimeCreate();
+}());
+</script>
+</body>
+</html>
