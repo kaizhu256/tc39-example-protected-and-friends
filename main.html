@@ -21,8 +21,9 @@ table th {
 <body>
 <button id="enemyCreateGoblin1">create goblin enemy</button><br>
 <button id="enemyCreateSlime1">create slime enemy</button><br>
-<button id="dbOpen1">load enemy database</button><br>
-<button id="dbSave1">save enemy database</button><br>
+<br>
+<button id="dbSave1">save sqlite database</button><br>
+<button id="dbOpen1">load sqlite database</button><br>
 <br>
 <table id="enemyTable1">
     <thead>
@@ -42,7 +43,7 @@ table th {
     let privateDatabase;
     let sqlCallbackDict;
     let sqlCallbackId;
-    async function sqlPostMessage({
+    async function privateSqlPostMessage({
         action = "exec",
         data,
         params,
@@ -54,6 +55,7 @@ table th {
         let id;
         sqlCallbackId += 1;
         id = sqlCallbackId;
+        console.error(sql);
         privateDatabase.postMessage({
             action,
             buffer: data,
@@ -86,19 +88,10 @@ table th {
         });
         return results;
     }
-    // init privateDatabase
-    sqlCallbackDict = {};
-    sqlCallbackId = 1;
-    privateDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
-    privateDatabase.onmessage = function ({
-        data
-    }) {
-        sqlCallbackDict[data.id](data);
-    };
     // init enemy-api
     async function enemyAttack(enemyid, amount) {
         console.error(enemyid);
-        await sqlPostMessage({
+        await privateSqlPostMessage({
             sql: (`
 UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemyid};
 DELETE FROM enemy where health <= 0;
@@ -112,7 +105,7 @@ DELETE FROM enemy where health <= 0;
     /*
      * this function with create a new enemy in sqlite
      */
-        await sqlPostMessage({
+        await privateSqlPostMessage({
             sql: (`
 CREATE TABLE IF NOT EXISTS enemy (
     type TEXT NOT NULL,
@@ -145,7 +138,7 @@ INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
      * this function with get list of enemies in sqlite
      */
         let data;
-        data = await sqlPostMessage({
+        data = await privateSqlPostMessage({
             sql: `SELECT rowid, * FROM enemy`
         });
         return data[0] || [];
@@ -177,26 +170,40 @@ INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
 </tr>
             `);
         }).join("");
-        // init evt-handling for #enemyTable1
-        document.querySelector(
-            "#enemyTable1 tbody"
-        ).addEventListener("click", async function ({
-            target
-        }) {
-            switch (target.dataset?.action) {
-            case "attack":
-                enemyAttack(target.dataset.rowid, 2);
-                await uiEnemyListRefresh();
-                break;
-            }
-        });
     }
+    // init privateDatabase
+    sqlCallbackDict = {};
+    sqlCallbackId = 1;
+    privateDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
+    privateDatabase.onmessage = function ({
+        data
+    }) {
+        sqlCallbackDict[data.id](data);
+    };
     // init evt-handling
     document.querySelector(
         "#enemyCreateGoblin1"
     ).addEventListener("click", async function () {
         await enemyCreateGoblin();
         await uiEnemyListRefresh();
+    });
+    document.querySelector(
+        "#enemyCreateSlime1"
+    ).addEventListener("click", async function () {
+        await enemyCreateSlime();
+        await uiEnemyListRefresh();
+    });
+    document.querySelector(
+        "#enemyTable1"
+    ).addEventListener("click", async function ({
+        target
+    }) {
+        switch (target.dataset?.action) {
+        case "attack":
+            enemyAttack(target.dataset.rowid, 2);
+            await uiEnemyListRefresh();
+            break;
+        }
     });
     await enemyCreateSlime();
     await uiEnemyListRefresh();
