@@ -4,6 +4,10 @@
 <style>
 body {
     font-family: consolas, menlo, monospace;
+    font-size: 11px;
+}
+button {
+    width: 200px;
 }
 table {
     border-collapse: collapse;
@@ -15,7 +19,11 @@ table th {
 </style>
 </head>
 <body>
-<button id="enemyCreate1">create protected slime enemy</button><br>
+<button id="enemyCreateGoblin1">create goblin enemy</button><br>
+<button id="enemyCreateSlime1">create slime enemy</button><br>
+<button id="dbOpen1">load enemy database</button><br>
+<button id="dbSave1">save enemy database</button><br>
+<br>
 <table id="enemyTable1">
     <thead>
     <tr>
@@ -25,37 +33,28 @@ table th {
         <th>health</th>
     </tr>
     </thead>
-    <tbody>
-    <tr>
-        <td><button>[protected] reduce health by 1</button></td>
-        <td>rowid</td>
-        <td>type</td>
-        <td>health</td>
-    </tr>
-    </tbody>
+    <tbody></tbody>
 </table>
-<textarea readonly="1">
-</textarea>
 <script>
 /* jslint utility2:true */
-(function () {
+(async function () {
     "use strict";
-    let protectedDatabase;
+    let privateDatabase;
     let sqlCallbackDict;
     let sqlCallbackId;
-    async function protectedMessagePost({
+    async function sqlPostMessage({
         action = "exec",
         data,
         params,
         sql
     }) {
     /*
-     * this function will post msg to <protectedDatabase> and return result
+     * this function will post msg to <privateDatabase> and return result
      */
         let id;
         sqlCallbackId += 1;
         id = sqlCallbackId;
-        protectedDatabase.postMessage({
+        privateDatabase.postMessage({
             action,
             buffer: data,
             id,
@@ -87,65 +86,77 @@ table th {
         });
         return results;
     }
-    // init protectedDatabase
+    // init privateDatabase
     sqlCallbackDict = {};
     sqlCallbackId = 1;
-    protectedDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
-    protectedDatabase.onmessage = function ({
+    privateDatabase = new Worker("assets.sqljs-v1.4.0.js?initSqlJsWorker=1");
+    privateDatabase.onmessage = function ({
         data
     }) {
         sqlCallbackDict[data.id](data);
     };
     // init enemy-api
-    let enemyIdDict;
-    enemyIdDict = {};
+    async function enemyAttack(enemyid, amount) {
+        console.error(enemyid);
+        await sqlPostMessage({
+            sql: (`
+UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemyid};
+DELETE FROM enemy where health <= 0;
+            `)
+        });
+    }
     async function enemyCreate({
         health,
         type
     }) {
-        let data;
-        let enemy;
-        let enemyid;
-        data = await protectedMessagePost({
+    /*
+     * this function with create a new enemy in sqlite
+     */
+        await sqlPostMessage({
             sql: (`
 CREATE TABLE IF NOT EXISTS enemy (
     type TEXT NOT NULL,
     health INTEGER NOT NULL
 );
 INSERT INTO enemy (type, health) VALUES ('${type}', ${health});
-SELECT LAST_INSERT_ROWID() AS enemyid;
             `)
         });
-        enemyid = data[0][0].enemyid;
-        enemy = {};
-        enemy.id = enemyid;
-        enemy.protectedHealthReduce = async function (amount) {
-            await protectedMessagePost({
-                sql: (`
-UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemyid};
-                `)
-            });
-        };
-        enemyIdDict[enemyid] = enemy;
-        return enemy;
+    }
+    async function enemyCreateGoblin() {
+    /*
+     * this function with create a new slime enemy in sqlite
+     */
+        enemyCreate({
+            health: 20,
+            type: "goblin"
+        });
+    }
+    async function enemyCreateSlime() {
+    /*
+     * this function with create a new slime enemy in sqlite
+     */
+        enemyCreate({
+            health: 10,
+            type: "slime"
+        });
     }
     async function enemyListGet() {
+    /*
+     * this function with get list of enemies in sqlite
+     */
         let data;
-        data = await protectedMessagePost({
+        data = await sqlPostMessage({
             sql: `SELECT rowid, * FROM enemy`
         });
-        return data[0];
+        return data[0] || [];
     }
-    // export enemy-api
-    window.enemyCreate = enemyCreate;
-    window.enemyListGet = enemyListGet;
-}());
-
-(async function () {
-    "use strict";
-    async function enemyListRefresh() {
+    async function uiEnemyListRefresh() {
+    /*
+     * this function will refresh the ui with list of enemies stored in sqlite
+     */
         let enemyList;
-        enemyList = await window.enemyListGet();
+        enemyList = await enemyListGet();
+        console.error(JSON.stringify(enemyList, undefined, 4));
         document.querySelector(
             "#enemyTable1 tbody"
         ).innerHTML = enemyList.map(function ({
@@ -153,19 +164,42 @@ UPDATE enemy SET health = health - ${amount} WHERE rowid = ${enemyid};
             rowid,
             type
         }) {
-            return `<li>f</li>`;
+            return (`
+<tr>
+    <td>
+        <button data-action="attack" data-rowid="${rowid}">
+        reduce health by 2
+        </button>
+    </td>
+    <td>${rowid}</td>
+    <td>${type}</td>
+    <td>${health}</td>
+</tr>
+            `);
+        }).join("");
+        // init evt-handling for #enemyTable1
+        document.querySelector(
+            "#enemyTable1 tbody"
+        ).addEventListener("click", async function ({
+            target
+        }) {
+            switch (target.dataset?.action) {
+            case "attack":
+                enemyAttack(target.dataset.rowid, 2);
+                await uiEnemyListRefresh();
+                break;
+            }
         });
     }
-    async function enemySlimeCreate() {
-        let enemy;
-        enemy = window.enemyCreate({
-            health: 10,
-            type: "slime"
-        });
-        return enemy;
-    }
-    let enemy = await enemySlimeCreate();
-    console.log(await window.enemyListGet());
+    // init evt-handling
+    document.querySelector(
+        "#enemyCreateGoblin1"
+    ).addEventListener("click", async function () {
+        await enemyCreateGoblin();
+        await uiEnemyListRefresh();
+    });
+    await enemyCreateSlime();
+    await uiEnemyListRefresh();
 }());
 </script>
 </body>
